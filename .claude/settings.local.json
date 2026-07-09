@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"C:\\\\Users\\\\sidaj\\\\Downloads\\\\job_search_copilot\")",
+      "Bash(powershell -Command \"Get-ChildItem -Path 'C:\\\\Users\\\\sidaj\\\\Downloads\\\\job_search_copilot' -Force | Format-Table Name, Length, LastWriteTime\")"
+    ]
+  }
+}

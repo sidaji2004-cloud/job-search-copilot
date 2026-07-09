@@ -1,0 +1,188 @@
+// Prisma schema — local SQLite. To deploy on Neon Postgres:
+//   1. change `provider = "postgresql"` below
+//   2. set DATABASE_URL to the Neon connection string
+//   3. run `prisma migrate deploy`
+// The schema avoids Postgres-only types (arrays, jsonb) so the swap needs no app changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Job {
+  id          String       @id @default(cuid())
+  title       String
+  company     String
+  location    String?
+  url         String?
+  description String
+  status      String       @default("WISHLIST") // INBOX | WISHLIST | APPLIED | INTERVIEWING | OFFER | REJECTED
+  position    Int          @default(0)
+  notes       String?
+  fitScore    Int?
+  fitReason   String?
+  summary           String?
+  experienceReq     String?
+  learningPotential Int?
+  legitimacyScore   Int?     // 0-100, lower = more likely a fake/scam role
+  redFlags          String?  // short LLM-supplied note when legitimacyScore < 60
+  source      String       @default("MANUAL") // MANUAL | BOOKMARKLET | ADZUNA | GREENHOUSE | LEVER
+  externalId  String? // stable id from the source (Adzuna id, Greenhouse job id, etc.) to prevent re-imports
+  appliedAt   DateTime?
+  followUpAt  DateTime?
+  interviewAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  generations Generation[]
+
+  @@unique([source, externalId])
+  @@index([status, position])
+}
+
+model SavedSearch {
+  id             String    @id @default(cuid())
+  kind           String // ADZUNA | GREENHOUSE | LEVER
+  query          String // Adzuna: "Product Manager" ; Greenhouse/Lever: company slug
+  location       String? // Adzuna location filter
+  country        String? // Adzuna two-letter country code (e.g. "in", "us")
+  lastFetchedAt  DateTime?
+  createdAt      DateTime  @default(now())
+}
+
+model Generation {
+  id        String   @id @default(cuid())
+  jobId     String
+  kind      String // COVER_LETTER | RESUME_BULLETS | INTERVIEW_QUESTIONS | COMPANY_BRIEF
+  content   String
+  model     String
+  createdAt DateTime @default(now())
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, kind])
+}
+
+model CompanyRating {
+  id         String   @id @default(cuid())
+  companyKey String   @unique // lowercased trimmed company name
+  prestige   Int      @default(5) // 0–10
+  reputation Int      @default(5) // 0–10
+  notes      String?
+  source     String   @default("LLM_KNOWLEDGE")
+  createdAt  DateTime @default(now())
+}
+
+model Profile {
+  id               Int      @id @default(1)
+  fullName         String   @default("Sidharth Ajith Kumar")
+  email            String   @default("")
+  resumeText       String   @default("")
+  digestRecipient  String?  // override for digest email; falls back to `email`
+  digestEnabled    Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+}
+
+// Daily digest send log — used for dedupe + status surface in Settings.
+model DigestLog {
+  id        String   @id @default(cuid())
+  sentAt    DateTime @default(now())
+  jobCount  Int
+  recipient String
+  status    String   @default("OK") // OK | SKIPPED_EMPTY | ERROR
+  errorMsg  String?
+
+  @@index([sentAt])
+}
+
+// Gmail OAuth refresh token — singleton row (id=1), updated on connect.
+model GmailToken {
+  id            Int      @id @default(1)
+  refreshToken  String
+  lastPolledAt  DateTime?
+  updatedAt     DateTime @updatedAt
+}
+
+// Inbound suggestions from any source (Gmail today, others later).
+model Suggestion {
+  id              String   @id @default(cuid())
+  externalId      String   @unique // e.g. Gmail message id — prevents re-processing
+  provider        String   // GMAIL | OUTLOOK | MANUAL
+  jobId           String?  // matched Job id, null if unmatched
+  subject         String
+  fromAddress     String
+  classification  String   // INTERVIEW_INVITE | REJECTION | OFFER | CONFIRMATION | OTHER
+  suggestedStatus String?  // INTERVIEWING | REJECTED | OFFER | null
+  confidence      Float?   // 0-1, from the LLM classifier
+  resolved        Boolean  @default(false)
+  receivedAt      DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([resolved, createdAt])
+  @@index([jobId])
+}
+
+// Skills Gap Tracker (v11) — one row per tracked skill, seeded with market
+// demand scores. currentLevel grows via SkillLog entries; never overwritten on
+// reseed so the user's progress is safe.
+model Skill {
+  id                    String                 @id @default(cuid())
+  name                  String                 @unique
+  category              String                 // TECHNICAL | TOOLS | ANALYTICAL | AI
+  marketDemand          Int                    // 0-10, refreshed weekly from live signals
+  marketDemandUpdatedAt DateTime?              // when marketDemand was last recomputed
+  currentLevel          Float                  @default(0)
+  position              Int                    @default(0)
+  resourceUrl           String?
+  resourceName          String?
+  updatedAt             DateTime               @updatedAt
+  logs                  SkillLog[]
+  demandSnapshots       MarketDemandSnapshot[]
+
+  @@index([position])
+}
+
+// v14 — historical record of market demand per refresh. Enables trend UI later.
+model MarketDemandSnapshot {
+  id           String   @id @default(cuid())
+  skillId      String
+  marketDemand Int
+  adzunaCount  Int      // raw Adzuna listing count at capture time
+  jobsMatching Int      // raw Inbox mention count at capture time
+  capturedAt   DateTime @default(now())
+  skill        Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@index([skillId, capturedAt])
+}
+
+// Practice log — each entry adds a computed levelGain to its Skill.
+// Undo within 24h is supported via DELETE which reverses the gain.
+model SkillLog {
+  id        String   @id @default(cuid())
+  skillId   String
+  hours     Float
+  note      String?
+  levelGain Float    // server-computed delta added to Skill.currentLevel
+  createdAt DateTime @default(now())
+  skill     Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([skillId])
+}
+
+// Hard-deleted job dismissals — snapshots the title/company/source so we
+// can analyse rejection patterns over time without keeping the Job row.
+model Dismissal {
+  id        String   @id @default(cuid())
+  jobTitle  String
+  company   String
+  source    String   @default("MANUAL")
+  fitScore  Int?
+  reason    String   // WRONG_FUNCTION | WRONG_STAGE | BAD_COMPANY | NOT_INTERESTED | UNSPECIFIED
+  createdAt DateTime @default(now())
+
+  @@index([reason])
+  @@index([createdAt])
+}
