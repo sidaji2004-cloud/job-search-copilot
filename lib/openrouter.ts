@@ -19,7 +19,7 @@ export async function chat({
       "OPENROUTER_API_KEY is not set. Add it to .env.local — see .env.local.example."
     );
   }
-  const useModel = model || process.env.OPENROUTER_DEFAULT_MODEL || "anthropic/claude-sonnet-4.5";
+  const useModel = model || process.env.OPENROUTER_DEFAULT_MODEL || "openai/gpt-oss-120b:free";
 
   const res = await fetch(OPENROUTER_URL, {
     method: "POST",

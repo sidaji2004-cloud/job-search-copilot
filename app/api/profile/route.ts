@@ -10,7 +10,7 @@ export async function GET() {
     create: { id: 1 },
   });
   const hasOpenrouter = Boolean(process.env.OPENROUTER_API_KEY);
-  const defaultModel = process.env.OPENROUTER_DEFAULT_MODEL || "anthropic/claude-sonnet-4.5";
+  const defaultModel = process.env.OPENROUTER_DEFAULT_MODEL || "openai/gpt-oss-120b:free";
   return NextResponse.json({ profile, hasOpenrouter, defaultModel });
 }
 
