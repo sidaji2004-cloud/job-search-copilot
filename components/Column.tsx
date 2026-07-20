@@ -82,9 +82,10 @@ export function Column({
         <div className="flex items-center gap-2 min-w-0">
           <h2
             className={cn(
-              "text-eyebrow uppercase truncate",
+              "text-eyebrow uppercase whitespace-nowrap",
               isInbox ? "text-ink" : "text-ink-subtle"
             )}
+            style={{ fontSize: "11px" }}
           >
             {STATUS_LABEL[status]}
           </h2>
